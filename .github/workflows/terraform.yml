@@ -35,6 +35,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.11.0
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -57,7 +58,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -input=false -no-color -var-file terraform.tfvars -out plan.out
+        run: terraform plan -var-file terraform.tfvars -out plan.out
         continue-on-error: true
 
       - name: Update Pull Request
@@ -96,7 +97,8 @@ jobs:
         id: terraform_output
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
         run: |
-          EC2_IP=$(terraform output -raw ec2_public_ip)
+          # Usar el nombre correcto del output: instance_public_ip en lugar de ec2_public_ip
+          EC2_IP=$(terraform output -raw instance_public_ip)
           echo "ec2_public_ip=${EC2_IP}" >> $GITHUB_OUTPUT
 
       - name: Wait for EC2 Instance to be Ready

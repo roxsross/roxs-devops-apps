@@ -16,6 +16,7 @@ on:
     workflows: ["Terraform IaC Deployment"]
     types:
       - completed
+    branches: [ main, devops-bookstore ]
 
 jobs:
   check_infra:
@@ -48,7 +49,8 @@ jobs:
         id: get_ec2_ip
         working-directory: ./terraform
         run: |
-          EC2_IP=$(terraform output -raw ec2_public_ip 2>/dev/null || echo "")
+          # Usar el nombre correcto del output: instance_public_ip en lugar de ec2_public_ip
+          EC2_IP=$(terraform output -raw instance_public_ip 2>/dev/null || echo "")
           if [ -z "$EC2_IP" ]; then
             echo "Infrastructure is not ready yet."
             exit 1
