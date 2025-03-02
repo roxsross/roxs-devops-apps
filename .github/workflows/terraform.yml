@@ -89,7 +89,7 @@ jobs:
             })
 
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' || github.ref == 'devops-bookstore'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
         run: terraform apply "plan.out" -input=false 
 
       - name: Get Terraform Outputs
