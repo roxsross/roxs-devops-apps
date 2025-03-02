@@ -3,7 +3,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: ${REGISTRY:-roxsross12}/${REPONAME:-bookstore}:${VERSION:-1.0.0-front}
+    image: ${REGISTRY:-roxsross12}/${REPONAME:-bookstore}:${VERSION_FRONT:-1.0.0-front}
     container_name: bookstore-frontend
     restart: unless-stopped
     ports:
@@ -26,7 +26,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: ${REGISTRY:-roxsross12}/${REPONAME:-bookstore}:${VERSION:-1.0.0-back}      
+    image: ${REGISTRY:-roxsross12}/${REPONAME:-bookstore}:${VERSION_BACK:-1.0.0-back}      
     container_name: bookstore-backend
     restart: unless-stopped
     ports:

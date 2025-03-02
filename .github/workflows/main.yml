@@ -182,11 +182,16 @@ jobs:
             export REGISTRY=${{ secrets.DOCKER_USERNAME }}
             export REPONAME=${{ github.event.repository.name }}
             export VERSION=${{ needs.check_infra.outputs.version }}
+
+            echo "$REGISTRY, $REPONAME, $VERSION"
             
             # Modificar compose.yml para usar las imágenes de Docker Hub
             sed -i "s/\${REGISTRY:-roxsross12}/\${REGISTRY}/g" compose.yml
             sed -i "s/\${REPONAME:-bookstore}/\${REPONAME}/g" compose.yml
-            sed -i "s/\${VERSION:-.*}/\${VERSION}/g" compose.yml
+            sed -i "s/\${VERSION_FRONT:-[^}]*}/${{ needs.check_infra.outputs.version }}-front/g" compose.yml
+            sed -i "s/\${VERSION_BACK:-[^}]*}/${{ needs.check_infra.outputs.version }}-back/g" compose.yml
+            
+            cat compose.yml
             
             # Start with Docker Compose
             docker compose -f compose.yml up -d
