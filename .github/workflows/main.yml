@@ -24,10 +24,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ec2_ip: ${{ steps.get_ec2_ip.outputs.ec2_ip }}
+      version: ${{ steps.get_version.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Generate version tag
+        id: get_version
+        run: |
+          # Obtener el package.json version y combinar con el SHA corto de git
+          PACKAGE_VERSION=$(node -p "require('./frontend/package.json').version || '1.0.0'")
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          VERSION="${PACKAGE_VERSION}-${SHORT_SHA}"
+          echo "Version: $VERSION"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -49,7 +60,6 @@ jobs:
         id: get_ec2_ip
         working-directory: ./terraform
         run: |
-          # Usar el nombre correcto del output: instance_public_ip en lugar de ec2_public_ip
           EC2_IP=$(terraform output -raw instance_public_ip 2>/dev/null || echo "")
           if [ -z "$EC2_IP" ]; then
             echo "Infrastructure is not ready yet."
@@ -83,17 +93,23 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build Docker image
-        run: |
-          docker build -t roxsross12/bookstore:${{ github.sha }}-back .
-          docker save roxsross12/bookstore:${{ github.sha }}-back > backend.tar
-
-      - name: Upload Docker image
-        uses: actions/upload-artifact@v4
+      - name: Login to Docker Hub
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        uses: docker/login-action@v3
         with:
-          name: backend-image
-          path: ./backend/backend.tar
-          retention-days: 1
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:${{ needs.check_infra.outputs.version }}-back
+            ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:latest-back
+
 
   build_and_test_frontend:
     name: 'Build and Test Frontend'
@@ -120,17 +136,22 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build Docker image
-        run: |
-          docker build -t roxsross12/bookstore:${{ github.sha }}-front .
-          docker save roxsross12/bookstore:${{ github.sha }}-front > frontend.tar
-
-      - name: Upload Docker image
-        uses: actions/upload-artifact@v4
+      - name: Login to Docker Hub
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        uses: docker/login-action@v3
         with:
-          name: frontend-image
-          path: ./frontend/frontend.tar
-          retention-days: 1
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:${{ needs.check_infra.outputs.version }}-front
+            ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:latest-front
 
   deploy:
     name: 'Deploy to EC2'
@@ -142,18 +163,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download backend image
-        uses: actions/download-artifact@v4
-        with:
-          name: backend-image
-          path: ./
-
-      - name: Download frontend image
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-image
-          path: ./
-
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
@@ -161,28 +170,27 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ needs.check_infra.outputs.ec2_ip }} >> ~/.ssh/known_hosts
 
-      - name: Copy compose file and images to EC2
+      - name: Copy compose file to EC2
         run: |
           scp -C compose.yml ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
-          scp -C backend.tar frontend.tar ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
 
       - name: Deploy applications
         run: |
           ssh ec2-user@${{ needs.check_infra.outputs.ec2_ip }} '
-            # Load Docker images
-            docker load < backend.tar
-            docker load < frontend.tar
             
-            # Set image tags in environment variables for compose
-            export REGISTRY=roxsross12
-            export REPONAME=bookstore
+            # Preparar variables para compose
+            export REGISTRY=${{ secrets.DOCKER_USERNAME }}
+            export REPONAME=${{ github.event.repository.name }}
+            export VERSION=${{ needs.check_infra.outputs.version }}
             
-            # Use GitHub SHA as version
-            export VERSION=${{ github.sha }}
+            # Modificar compose.yml para usar las imágenes de Docker Hub
+            sed -i "s/\${REGISTRY:-roxsross12}/\${REGISTRY}/g" compose.yml
+            sed -i "s/\${REPONAME:-bookstore}/\${REPONAME}/g" compose.yml
+            sed -i "s/\${VERSION:-.*}/\${VERSION}/g" compose.yml
             
             # Start with Docker Compose
             docker compose -f compose.yml up -d
             
-            # Clean up
-            rm backend.tar frontend.tar
+            # Verificar status
+            docker compose ps
           '
