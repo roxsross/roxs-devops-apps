@@ -187,8 +187,10 @@ jobs:
             export REGISTRY=${{ secrets.DOCKER_USERNAME }}
             export REPONAME=${{ github.event.repository.name }}
             export VERSION=${{ needs.check_infra.outputs.version }}
+            export CORS=http://${{ needs.check_infra.outputs.ec2_ip}}:5173
+            export API=http://${{ needs.check_infra.outputs.ec2_ip}}:3333
 
-            echo "$REGISTRY, $REPONAME, $VERSION"
+            echo "$REGISTRY, $REPONAME, $VERSION, $CORS, $API"
             
             # Modificar compose.yml para usar las imágenes de Docker Hub
             sed -i "s/\${VERSION_FRONT:-[^}]*}/${{ needs.check_infra.outputs.version }}-front/g" compose.yml

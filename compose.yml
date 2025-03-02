@@ -9,7 +9,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - API_BASE_URL=http://localhost:3333
+      - API_BASE_URL=${API:-http://localhost:3333}
     networks:
       - mern-stack
     healthcheck:
@@ -33,7 +33,7 @@ services:
       - "3333:3333"
     environment:
       - DATABASE_URI=mongodb://mongo:27017/bookstore
-      - CORS_ORIGIN=http://localhost:5173
+      - CORS_ORIGIN=${CORS:-http://localhost:5173}
     networks:
       - mern-stack
     healthcheck:
