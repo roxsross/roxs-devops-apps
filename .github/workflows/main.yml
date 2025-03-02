@@ -1,0 +1,179 @@
+name: Applications Deployment
+
+on:
+  push:
+    branches: [ main, devops-bookstore ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+  pull_request:
+    branches: [ main, devops-bookstore ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Terraform IaC Deployment"]
+    types:
+      - completed
+
+jobs:
+  check_infra:
+    name: 'Check Infrastructure Status'
+    runs-on: ubuntu-latest
+    outputs:
+      ec2_ip: ${{ steps.get_ec2_ip.outputs.ec2_ip }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.0
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Get EC2 IP
+        id: get_ec2_ip
+        working-directory: ./terraform
+        run: |
+          EC2_IP=$(terraform output -raw ec2_public_ip 2>/dev/null || echo "")
+          if [ -z "$EC2_IP" ]; then
+            echo "Infrastructure is not ready yet."
+            exit 1
+          fi
+          echo "EC2 instance is available at: $EC2_IP"
+          echo "ec2_ip=${EC2_IP}" >> $GITHUB_OUTPUT
+
+  build_and_test_backend:
+    name: 'Build and Test Backend'
+    needs: check_infra
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './backend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Docker image
+        run: |
+          docker build -t roxsross12/bookstore:${{ github.sha }}-back .
+          docker save roxsross12/bookstore:${{ github.sha }}-back > backend.tar
+
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image
+          path: ./backend/backend.tar
+          retention-days: 1
+
+  build_and_test_frontend:
+    name: 'Build and Test Frontend'
+    needs: check_infra
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Docker image
+        run: |
+          docker build -t roxsross12/bookstore:${{ github.sha }}-front .
+          docker save roxsross12/bookstore:${{ github.sha }}-front > frontend.tar
+
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image
+          path: ./frontend/frontend.tar
+          retention-days: 1
+
+  deploy:
+    name: 'Deploy to EC2'
+    needs: [check_infra, build_and_test_backend, build_and_test_frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download backend image
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+          path: ./
+
+      - name: Download frontend image
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+          path: ./
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ needs.check_infra.outputs.ec2_ip }} >> ~/.ssh/known_hosts
+
+      - name: Copy compose file and images to EC2
+        run: |
+          scp -C compose.yml ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
+          scp -C backend.tar frontend.tar ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
+
+      - name: Deploy applications
+        run: |
+          ssh ec2-user@${{ needs.check_infra.outputs.ec2_ip }} '
+            # Load Docker images
+            docker load < backend.tar
+            docker load < frontend.tar
+            
+            # Set image tags in environment variables for compose
+            export REGISTRY=roxsross12
+            export REPONAME=bookstore
+            
+            # Use GitHub SHA as version
+            export VERSION=${{ github.sha }}
+            
+            # Start with Docker Compose
+            docker compose -f compose.yml up -d
+            
+            # Clean up
+            rm backend.tar frontend.tar
+          '

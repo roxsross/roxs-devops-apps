@@ -1,0 +1,122 @@
+name: Terraform IaC Deployment
+
+on:
+  push:
+    branches: [ main, devops-bookstore ]
+    paths:
+      - 'terraform/**'
+  pull_request:
+    branches: [ main, devops-bookstore ]
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+    outputs:
+      ec2_ip: ${{ steps.terraform_output.outputs.ec2_public_ip }}
+      deployment_ready: ${{ steps.deployment_ready.outputs.ready }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.0
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -input=false -no-color -var-file terraform.tfvars -out plan.out
+        continue-on-error: true
+
+      - name: Update Pull Request
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' || github.ref == 'devops-bookstore'
+        run: terraform apply "plan.out" -input=false 
+
+      - name: Get Terraform Outputs
+        id: terraform_output
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        run: |
+          EC2_IP=$(terraform output -raw ec2_public_ip)
+          echo "ec2_public_ip=${EC2_IP}" >> $GITHUB_OUTPUT
+
+      - name: Wait for EC2 Instance to be Ready
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        id: wait_for_ec2
+        run: |
+          echo "Waiting for EC2 instance to be ready..."
+          timeout=600
+          interval=10
+          elapsed=0
+          
+          until nc -z -w 5 ${{ steps.terraform_output.outputs.ec2_public_ip }} 22; do
+            if [ $elapsed -ge $timeout ]; then
+              echo "Timeout waiting for EC2 instance to be ready"
+              exit 1
+            fi
+            echo "Waiting for SSH to be available... ($elapsed/$timeout seconds)"
+            sleep $interval
+            elapsed=$((elapsed + interval))
+          done
+          
+          # Additional wait to make sure system is fully initialized
+          sleep 60
+          echo "EC2 instance is ready!"
+
+      - name: Set Deployment Ready Flag
+        id: deployment_ready
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devops-bookstore'
+        run: echo "ready=true" >> $GITHUB_OUTPUT
