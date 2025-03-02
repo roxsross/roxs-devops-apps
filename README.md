@@ -85,3 +85,31 @@ Puedes conectarte a la base de datos usando cualquier cliente MongoDB como Mongo
 3. **Los cambios en el código no se reflejan**:
    - Para el frontend, verifica que Vite esté configurado para hot-reload
    - Para el backend, puede ser necesario reiniciar el servicio o usar nodemon
+
+
+## Terraform
+
+```
+┌─────────────────────┐      ┌────────────────────┐
+│ Terraform Workflow  │ ───► │ Application Workflow│
+│ (Infraestructura)   │      │ (Frontend/Backend)  │
+└─────────────────────┘      └────────────────────┘
+        │                              │
+        ▼                              ▼
+┌─────────────────────┐      ┌────────────────────┐
+│ Terraform Apply     │      │ Build Docker Images│
+│ (Crea EC2, VPC...)  │      │ (Frontend/Backend) │
+└─────────────────────┘      └────────────────────┘
+        │                              │
+        ▼                              ▼
+┌─────────────────────┐      ┌────────────────────┐
+│ Espera disponibilidad│      │ Transferir a EC2  │
+│ (Puerto SSH abierto) │      │ (SCP archivos)    │
+└─────────────────────┘      └────────────────────┘
+                                      │
+                                      ▼
+                             ┌────────────────────┐
+                             │ Despliegue con     │
+                             │ Docker Compose     │
+                             └────────────────────┘
+```
