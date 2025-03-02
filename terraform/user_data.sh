@@ -1,4 +1,5 @@
 #!/bin/bash
+#roxsross
 set -eux  # Habilita modo debug y detiene en errores
 sudo yum update -y
 sudo yum install -y docker git
