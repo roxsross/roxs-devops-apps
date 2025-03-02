@@ -162,6 +162,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
@@ -171,8 +173,10 @@ jobs:
 
       - name: Copy compose file to EC2
         run: |
+          pwd  # Ver el directorio actual
+          ls -la 
           scp -C compose.yml ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
-          scp -R mongo-init ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
+          sscp -r ./mongo-init ec2-user@${{ needs.check_infra.outputs.ec2_ip }}:~/
 
       - name: Deploy applications
         run: |
